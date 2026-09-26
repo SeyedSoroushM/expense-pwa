@@ -1,10 +1,11 @@
 'use strict';
 
 const DB_NAME = 'expense-pwa-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_RECORDS = 'records';
 const STORE_OPS = 'ops';
 const STORE_SETTINGS = 'settings';
+const STORE_PROJECTS = 'projects';
 
 const PERSIAN_MONTHS = [
   'فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور',
@@ -15,9 +16,15 @@ const WEEKDAYS = ['ش','ی','د','س','چ','پ','ج'];
 
 const state = {
   records: [],
+  projects: [],
   pendingOps: [],
   today: '',
   syncing: false,
+  filters: {
+    projectId: '',
+    fromDate: '',
+    toDate: ''
+  },
   settings: {
     apiUrl: '',
     apiToken: ''
@@ -28,6 +35,7 @@ const state = {
 let dbPromise = null;
 let calYear = 1400;
 let calMonth = 1;
+let calendarTargetId = 'date';
 let toastTimer = null;
 
 const $ = id => document.getElementById(id);
@@ -41,12 +49,12 @@ window.addEventListener('orientationchange', () => setTimeout(repositionCalendar
 window.addEventListener('beforeinstallprompt', event => {
   event.preventDefault();
   state.installPrompt = event;
-  $('installBtn').hidden = false;
+  if ($('installBtn')) $('installBtn').hidden = false;
 });
 
 window.addEventListener('appinstalled', () => {
   state.installPrompt = null;
-  $('installBtn').hidden = true;
+  if ($('installBtn')) $('installBtn').hidden = true;
   toast('برنامه نصب شد.');
 });
 
@@ -67,48 +75,82 @@ async function bootstrap() {
   }
 
   setInterval(() => {
-    if (navigator.onLine && !state.syncing && state.settings.apiUrl && state.settings.apiToken) {
+    if (
+      navigator.onLine &&
+      !state.syncing &&
+      state.settings.apiUrl &&
+      state.settings.apiToken
+    ) {
       syncNow({ silent: true });
     }
   }, 60000);
 }
 
 function wireEvents() {
-  $('addBtn').addEventListener('click', openNewRecord);
-  $('syncBtn').addEventListener('click', () => syncNow({ silent: false }));
-  $('settingsBtn').addEventListener('click', openSettings);
-  $('installBtn').addEventListener('click', installApp);
+  $('addBtn')?.addEventListener('click', openNewRecord);
+  $('syncBtn')?.addEventListener('click', () => syncNow({ silent: false }));
+  $('settingsBtn')?.addEventListener('click', openSettings);
+  $('installBtn')?.addEventListener('click', installApp);
+  $('exportExcelBtn')?.addEventListener('click', exportExcel);
 
-  $('recordCloseBtn').addEventListener('click', closeRecordModal);
-  $('recordCancelBtn').addEventListener('click', closeRecordModal);
-  $('recordSaveBtn').addEventListener('click', saveRecordFromModal);
-  $('recordOverlay').addEventListener('click', event => {
+  $('recordCloseBtn')?.addEventListener('click', closeRecordModal);
+  $('recordCancelBtn')?.addEventListener('click', closeRecordModal);
+  $('recordSaveBtn')?.addEventListener('click', saveRecordFromModal);
+  $('recordOverlay')?.addEventListener('click', event => {
     if (event.target === $('recordOverlay')) closeRecordModal();
   });
 
-  $('settingsCloseBtn').addEventListener('click', closeSettings);
-  $('saveSettingsBtn').addEventListener('click', saveSettingsFromModal);
-  $('testConnectionBtn').addEventListener('click', testConnection);
-  $('settingsOverlay').addEventListener('click', event => {
+  $('settingsCloseBtn')?.addEventListener('click', closeSettings);
+  $('saveSettingsBtn')?.addEventListener('click', saveSettingsFromModal);
+  $('testConnectionBtn')?.addEventListener('click', testConnection);
+  $('settingsOverlay')?.addEventListener('click', event => {
     if (event.target === $('settingsOverlay')) closeSettings();
   });
 
-  $('amount').addEventListener('input', event => formatAmountInput(event.target));
-  $('date').addEventListener('click', openCalendar);
-  $('calendarTrigger').addEventListener('click', event => {
-    event.stopPropagation();
-    openCalendar();
+  $('manageProjectsBtn')?.addEventListener('click', openProjectManager);
+  $('projectCloseBtn')?.addEventListener('click', closeProjectManager);
+  $('projectSaveBtn')?.addEventListener('click', saveProject);
+  $('projectCancelEditBtn')?.addEventListener('click', cancelProjectEdit);
+  $('projectOverlay')?.addEventListener('click', event => {
+    if (event.target === $('projectOverlay')) closeProjectManager();
   });
-  $('calPrevBtn').addEventListener('click', () => changeCalendarMonth(-1));
-  $('calNextBtn').addEventListener('click', () => changeCalendarMonth(1));
-  $('calTodayBtn').addEventListener('click', selectToday);
-  $('calendarPopover').addEventListener('click', event => event.stopPropagation());
+
+  $('applyFilterBtn')?.addEventListener('click', applyFilters);
+  $('resetFilterBtn')?.addEventListener('click', resetFilters);
+
+  $('amount')?.addEventListener('input', event => formatAmountInput(event.target));
+
+  $('date')?.addEventListener('click', () => openCalendarFor('date'));
+  $('calendarTrigger')?.addEventListener('click', event => {
+    event.stopPropagation();
+    openCalendarFor('date');
+  });
+
+  $('filterFrom')?.addEventListener('click', () => openCalendarFor('filterFrom'));
+  $('filterFromCalendarBtn')?.addEventListener('click', event => {
+    event.stopPropagation();
+    openCalendarFor('filterFrom');
+  });
+
+  $('filterTo')?.addEventListener('click', () => openCalendarFor('filterTo'));
+  $('filterToCalendarBtn')?.addEventListener('click', event => {
+    event.stopPropagation();
+    openCalendarFor('filterTo');
+  });
+
+  $('calPrevBtn')?.addEventListener('click', () => changeCalendarMonth(-1));
+  $('calNextBtn')?.addEventListener('click', () => changeCalendarMonth(1));
+  $('calTodayBtn')?.addEventListener('click', selectToday);
+  $('calendarPopover')?.addEventListener('click', event => event.stopPropagation());
 
   document.addEventListener('click', event => {
     const popover = $('calendarPopover');
-    const field = $('dateField');
+    if (!popover || !popover.classList.contains('show')) return;
 
-    if (popover.classList.contains('show') && !field.contains(event.target)) {
+    const input = $(calendarTargetId);
+    const wrap = input ? input.closest('.date-wrap') : null;
+
+    if (!popover.contains(event.target) && !(wrap && wrap.contains(event.target))) {
       closeCalendar();
     }
   });
@@ -118,7 +160,8 @@ async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
 
   try {
-    await navigator.serviceWorker.register('./sw.js', { scope: './' });
+    const registration = await navigator.serviceWorker.register('./sw.js', { scope: './' });
+    registration.update().catch(() => undefined);
   } catch (error) {
     console.warn('Service worker registration failed:', error);
   }
@@ -133,7 +176,7 @@ async function installApp() {
   state.installPrompt.prompt();
   await state.installPrompt.userChoice;
   state.installPrompt = null;
-  $('installBtn').hidden = true;
+  if ($('installBtn')) $('installBtn').hidden = true;
 }
 
 function openDb() {
@@ -159,6 +202,12 @@ function openDb() {
 
       if (!db.objectStoreNames.contains(STORE_SETTINGS)) {
         db.createObjectStore(STORE_SETTINGS, { keyPath: 'key' });
+      }
+
+      if (!db.objectStoreNames.contains(STORE_PROJECTS)) {
+        const store = db.createObjectStore(STORE_PROJECTS, { keyPath: 'id' });
+        store.createIndex('name', 'name', { unique: false });
+        store.createIndex('updatedAt', 'updatedAt', { unique: false });
       }
     };
 
@@ -224,8 +273,15 @@ async function idbBulkApply({ puts = [], deletes = [], storeName }) {
 }
 
 async function refreshLocalState() {
-  state.records = await idbGetAll(STORE_RECORDS);
-  state.pendingOps = await idbGetAll(STORE_OPS);
+  const [records, projects, pendingOps] = await Promise.all([
+    idbGetAll(STORE_RECORDS),
+    idbGetAll(STORE_PROJECTS),
+    idbGetAll(STORE_OPS)
+  ]);
+
+  state.records = records;
+  state.projects = projects;
+  state.pendingOps = pendingOps;
 }
 
 async function loadSettings() {
@@ -249,24 +305,104 @@ async function saveSettings(apiUrl, apiToken) {
   state.settings.apiToken = normalizedToken;
 }
 
+function activeProjects() {
+  return [...state.projects]
+    .filter(project => project && project.id && project.name)
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), 'fa'));
+}
+
+function getProjectById(id) {
+  return state.projects.find(x => String(x.id) === String(id)) || null;
+}
+
+function resolveProjectName(record) {
+  const project = getProjectById(record.projectId);
+  if (project) return project.name;
+  return String(record.projectName || '').trim() || 'بدون پروژه';
+}
+
+function renderProjectControls() {
+  const recordSelect = $('projectId');
+  const filterSelect = $('filterProject');
+  const projects = activeProjects();
+
+  if (recordSelect) {
+    const previous = recordSelect.value;
+    recordSelect.innerHTML = '<option value="">انتخاب پروژه...</option>';
+
+    projects.forEach(project => {
+      const option = document.createElement('option');
+      option.value = project.id;
+      option.textContent = project.name;
+      recordSelect.appendChild(option);
+    });
+
+    if (projects.some(x => String(x.id) === String(previous))) {
+      recordSelect.value = previous;
+    }
+  }
+
+  if (filterSelect) {
+    const wanted = state.filters.projectId;
+    filterSelect.innerHTML = '<option value="">همه پروژه‌ها</option><option value="__NONE__">بدون پروژه</option>';
+
+    projects.forEach(project => {
+      const option = document.createElement('option');
+      option.value = project.id;
+      option.textContent = project.name;
+      filterSelect.appendChild(option);
+    });
+
+    filterSelect.value = wanted || '';
+  }
+}
+
+function getFilteredRecords() {
+  return [...state.records]
+    .filter(record => {
+      const projectFilter = state.filters.projectId;
+
+      if (projectFilter === '__NONE__') {
+        if (String(record.projectId || '').trim()) return false;
+      } else if (projectFilter && String(record.projectId || '') !== String(projectFilter)) {
+        return false;
+      }
+
+      const date = normalizePersianDate(record.date);
+      if (state.filters.fromDate && (!date || date < state.filters.fromDate)) return false;
+      if (state.filters.toDate && (!date || date > state.filters.toDate)) return false;
+
+      return true;
+    })
+    .sort(compareRecordsDesc);
+}
+
 function render() {
-  const records = [...state.records]
-    .sort(compareRecordsDesc)
+  renderProjectControls();
+
+  const records = getFilteredRecords()
     .map((record, index) => ({ ...record, rowNo: index + 1 }));
 
-  const pendingIds = new Set(state.pendingOps.map(op => op.id));
+  const pendingRecordIds = new Set(
+    state.pendingOps
+      .filter(op => String(op.entity || 'record') === 'record')
+      .map(op => String(op.id))
+  );
+
   const tbody = $('tbody');
+  if (!tbody) return;
   tbody.innerHTML = '';
 
   for (const item of records) {
     const tr = document.createElement('tr');
-    const pending = pendingIds.has(item.id);
+    const pending = pendingRecordIds.has(String(item.id));
 
     tr.innerHTML = `
       <td>${escapeHtml(String(item.rowNo))}</td>
       <td class="amount">${money(item.amount)}</td>
       <td class="reason">${escapeHtml(item.reason)}</td>
       <td class="payee">${escapeHtml(item.payee || '—')}</td>
+      <td class="project">${escapeHtml(resolveProjectName(item))}</td>
       <td>${escapeHtml(item.date)}</td>
       <td>
         <span class="sync-badge ${pending ? 'pending' : ''}">
@@ -292,10 +428,12 @@ function render() {
     btn.addEventListener('click', () => deleteRecord(btn.dataset.id));
   });
 
-  $('emptyState').hidden = records.length !== 0;
-  $('totalValue').textContent = money(records.reduce((sum, x) => sum + Number(x.amount || 0), 0));
-  $('countValue').textContent = records.length.toLocaleString('fa-IR');
-  $('pendingValue').textContent = state.pendingOps.length.toLocaleString('fa-IR');
+  if ($('emptyState')) $('emptyState').hidden = records.length !== 0;
+  if ($('totalValue')) {
+    $('totalValue').textContent = money(records.reduce((sum, x) => sum + Number(x.amount || 0), 0));
+  }
+  if ($('countValue')) $('countValue').textContent = records.length.toLocaleString('fa-IR');
+  if ($('pendingValue')) $('pendingValue').textContent = state.pendingOps.length.toLocaleString('fa-IR');
 
   updateConnectivityUi();
 }
@@ -306,29 +444,75 @@ function compareRecordsDesc(a, b) {
   return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
 }
 
+function applyFilters() {
+  const projectId = $('filterProject') ? $('filterProject').value : '';
+  const fromValue = $('filterFrom') ? $('filterFrom').value.trim() : '';
+  const toValue = $('filterTo') ? $('filterTo').value.trim() : '';
+
+  const fromDate = fromValue ? normalizePersianDate(fromValue) : '';
+  const toDate = toValue ? normalizePersianDate(toValue) : '';
+
+  if (fromValue && !fromDate) {
+    toast('تاریخ شروع نامعتبر است.');
+    return;
+  }
+
+  if (toValue && !toDate) {
+    toast('تاریخ پایان نامعتبر است.');
+    return;
+  }
+
+  if (fromDate && toDate && fromDate > toDate) {
+    toast('تاریخ شروع نمی‌تواند بعد از تاریخ پایان باشد.');
+    return;
+  }
+
+  state.filters = { projectId, fromDate, toDate };
+  render();
+}
+
+function resetFilters() {
+  state.filters = { projectId: '', fromDate: '', toDate: '' };
+
+  if ($('filterProject')) $('filterProject').value = '';
+  if ($('filterFrom')) $('filterFrom').value = '';
+  if ($('filterTo')) $('filterTo').value = '';
+
+  render();
+}
+
 function openNewRecord() {
+  renderProjectControls();
+
   $('modalTitle').textContent = 'ایجاد ردیف جدید';
   $('recordId').value = '';
   $('amount').value = '';
   $('reason').value = '';
   $('payee').value = '';
+  if ($('projectId')) $('projectId').value = '';
+
   state.today = getPersianTodayClient() || state.today;
   $('date').value = state.today || '';
+
   closeCalendar();
   showOverlay($('recordOverlay'));
   setTimeout(() => $('amount').focus(), 80);
 }
 
 function editRecord(id) {
-  const item = state.records.find(x => x.id === id);
+  const item = state.records.find(x => String(x.id) === String(id));
   if (!item) return;
+
+  renderProjectControls();
 
   $('modalTitle').textContent = 'ویرایش ردیف';
   $('recordId').value = item.id;
   $('amount').value = money(item.amount);
   $('reason').value = item.reason;
   $('payee').value = item.payee || '';
+  if ($('projectId')) $('projectId').value = item.projectId || '';
   $('date').value = item.date;
+
   closeCalendar();
   showOverlay($('recordOverlay'));
 }
@@ -338,6 +522,7 @@ async function saveRecordFromModal() {
   const amount = normalizeAmount($('amount').value);
   const reason = String($('reason').value || '').trim();
   const payee = String($('payee').value || '').trim();
+  const projectId = String($('projectId')?.value || '').trim();
   const date = normalizePersianDate($('date').value || state.today);
 
   if (!(amount > 0)) {
@@ -347,6 +532,17 @@ async function saveRecordFromModal() {
 
   if (!reason) {
     toast('لطفاً بابت را وارد کنید.');
+    return;
+  }
+
+  if (!projectId) {
+    toast('لطفاً پروژه را انتخاب کنید.');
+    return;
+  }
+
+  const project = getProjectById(projectId);
+  if (!project) {
+    toast('پروژه انتخاب‌شده معتبر نیست.');
     return;
   }
 
@@ -360,6 +556,8 @@ async function saveRecordFromModal() {
     amount,
     reason,
     payee,
+    projectId,
+    projectName: project.name,
     date,
     updatedAt: Date.now()
   };
@@ -379,6 +577,7 @@ async function saveRecordFromModal() {
 async function saveRecordOffline(record) {
   const op = {
     opId: createUuid(),
+    entity: 'record',
     type: 'upsert',
     id: record.id,
     updatedAt: record.updatedAt,
@@ -386,11 +585,11 @@ async function saveRecordOffline(record) {
   };
 
   await idbPut(STORE_RECORDS, record);
-  await replacePendingOpsForId(record.id, op);
+  await replacePendingOpsForEntityId('record', record.id, op);
 }
 
 async function deleteRecord(id) {
-  const item = state.records.find(x => x.id === id);
+  const item = state.records.find(x => String(x.id) === String(id));
   if (!item) return;
 
   if (!confirm(`ردیف با تاریخ ${item.date} حذف شود؟`)) return;
@@ -398,6 +597,7 @@ async function deleteRecord(id) {
   const updatedAt = Date.now();
   const op = {
     opId: createUuid(),
+    entity: 'record',
     type: 'delete',
     id,
     updatedAt,
@@ -405,7 +605,7 @@ async function deleteRecord(id) {
   };
 
   await idbDelete(STORE_RECORDS, id);
-  await replacePendingOpsForId(id, op);
+  await replacePendingOpsForEntityId('record', id, op);
   await refreshLocalState();
   render();
 
@@ -416,7 +616,154 @@ async function deleteRecord(id) {
   }
 }
 
-async function replacePendingOpsForId(id, newOp) {
+function openProjectManager() {
+  cancelProjectEdit();
+  renderProjectManager();
+  showOverlay($('projectOverlay'));
+  setTimeout(() => $('projectName')?.focus(), 80);
+}
+
+function closeProjectManager() {
+  cancelProjectEdit();
+  hideOverlay($('projectOverlay'));
+}
+
+function renderProjectManager() {
+  const container = $('projectList');
+  if (!container) return;
+
+  container.innerHTML = '';
+  const projects = activeProjects();
+
+  if (!projects.length) {
+    container.innerHTML = '<div class="project-empty">هنوز پروژه‌ای تعریف نشده است.</div>';
+    return;
+  }
+
+  projects.forEach(project => {
+    const row = document.createElement('div');
+    row.className = 'project-row';
+    row.innerHTML = `
+      <div class="project-row-name">${escapeHtml(project.name)}</div>
+      <div class="project-row-actions">
+        <button type="button" class="project-small-btn project-edit-btn" data-id="${escapeHtmlAttr(project.id)}">ویرایش</button>
+        <button type="button" class="project-small-btn delete project-delete-btn" data-id="${escapeHtmlAttr(project.id)}">حذف</button>
+      </div>
+    `;
+    container.appendChild(row);
+  });
+
+  container.querySelectorAll('.project-edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => beginEditProject(btn.dataset.id));
+  });
+
+  container.querySelectorAll('.project-delete-btn').forEach(btn => {
+    btn.addEventListener('click', () => deleteProject(btn.dataset.id));
+  });
+}
+
+function beginEditProject(id) {
+  const project = getProjectById(id);
+  if (!project) return;
+
+  $('projectEditId').value = project.id;
+  $('projectName').value = project.name;
+  $('projectSaveBtn').textContent = 'ذخیره تغییرات';
+  $('projectCancelEditBtn').hidden = false;
+  $('projectName').focus();
+}
+
+function cancelProjectEdit() {
+  if ($('projectEditId')) $('projectEditId').value = '';
+  if ($('projectName')) $('projectName').value = '';
+  if ($('projectSaveBtn')) $('projectSaveBtn').textContent = 'افزودن پروژه';
+  if ($('projectCancelEditBtn')) $('projectCancelEditBtn').hidden = true;
+}
+
+async function saveProject() {
+  const name = String($('projectName')?.value || '').trim();
+  if (!name) {
+    toast('نام پروژه را وارد کنید.');
+    return;
+  }
+
+  const editingId = String($('projectEditId')?.value || '');
+  const normalizedName = name.toLocaleLowerCase('fa');
+  const duplicate = state.projects.find(project =>
+    String(project.id) !== editingId &&
+    String(project.name || '').trim().toLocaleLowerCase('fa') === normalizedName
+  );
+
+  if (duplicate) {
+    toast('پروژه‌ای با این نام قبلاً وجود دارد.');
+    return;
+  }
+
+  const id = editingId || `project-${createUuid()}`;
+  const updatedAt = Date.now();
+  const project = { id, name, updatedAt };
+
+  await idbPut(STORE_PROJECTS, project);
+
+  const op = {
+    opId: createUuid(),
+    entity: 'project',
+    type: 'upsert',
+    id,
+    updatedAt,
+    project
+  };
+
+  await replacePendingOpsForEntityId('project', id, op);
+  await refreshLocalState();
+
+  render();
+  renderProjectManager();
+  cancelProjectEdit();
+
+  toast(editingId ? 'پروژه ویرایش شد.' : 'پروژه اضافه شد.');
+
+  if (navigator.onLine && state.settings.apiUrl && state.settings.apiToken) {
+    syncNow({ silent: true });
+  }
+}
+
+async function deleteProject(id) {
+  const project = getProjectById(id);
+  if (!project) return;
+
+  const used = state.records.some(record => String(record.projectId || '') === String(id));
+  if (used) {
+    toast('این پروژه در رکوردها استفاده شده است؛ ابتدا پروژه رکوردهای مربوطه را تغییر دهید.');
+    return;
+  }
+
+  if (!confirm(`پروژه «${project.name}» حذف شود؟`)) return;
+
+  const updatedAt = Date.now();
+  await idbDelete(STORE_PROJECTS, id);
+
+  const op = {
+    opId: createUuid(),
+    entity: 'project',
+    type: 'delete',
+    id,
+    updatedAt,
+    project: null
+  };
+
+  await replacePendingOpsForEntityId('project', id, op);
+  await refreshLocalState();
+
+  render();
+  renderProjectManager();
+
+  if (navigator.onLine && state.settings.apiUrl && state.settings.apiToken) {
+    syncNow({ silent: true });
+  }
+}
+
+async function replacePendingOpsForEntityId(entity, id, newOp) {
   const db = await openDb();
 
   return new Promise((resolve, reject) => {
@@ -428,7 +775,8 @@ async function replacePendingOpsForId(id, newOp) {
     req.onsuccess = event => {
       const cursor = event.target.result;
       if (cursor) {
-        cursor.delete();
+        const oldEntity = String(cursor.value.entity || 'record');
+        if (oldEntity === entity) cursor.delete();
         cursor.continue();
         return;
       }
@@ -491,7 +839,6 @@ async function syncNow({ silent = false } = {}) {
     render();
 
     if (!silent) toast('همگام‌سازی با Google Sheets انجام شد.');
-
   } catch (error) {
     console.error(error);
     updateConnectivityUi('error');
@@ -508,7 +855,10 @@ function coalesceOps(ops) {
 
   [...ops]
     .sort((a, b) => Number(a.updatedAt || 0) - Number(b.updatedAt || 0))
-    .forEach(op => map.set(op.id, op));
+    .forEach(op => {
+      const entity = String(op.entity || 'record');
+      map.set(`${entity}:${op.id}`, { ...op, entity });
+    });
 
   return [...map.values()];
 }
@@ -527,9 +877,7 @@ async function postOpsFetch(ops) {
     cache: 'no-store'
   });
 
-  if (!response.ok) {
-    throw new Error(`خطای HTTP ${response.status}`);
-  }
+  if (!response.ok) throw new Error(`خطای HTTP ${response.status}`);
 
   const text = await response.text();
   const data = JSON.parse(text);
@@ -552,10 +900,7 @@ async function postOpsFormFallback(ops) {
   const input = document.createElement('input');
   input.type = 'hidden';
   input.name = 'payload';
-  input.value = JSON.stringify({
-    token: state.settings.apiToken,
-    ops
-  });
+  input.value = JSON.stringify({ token: state.settings.apiToken, ops });
 
   form.appendChild(input);
   document.body.appendChild(form);
@@ -589,12 +934,8 @@ async function pullSnapshot() {
       cache: 'no-store'
     });
 
-    if (!response.ok) {
-      throw new Error(`خطای HTTP ${response.status}`);
-    }
-
+    if (!response.ok) throw new Error(`خطای HTTP ${response.status}`);
     return await response.json();
-
   } catch (error) {
     console.warn('GET fetch failed; using JSONP fallback:', error);
     return pullSnapshotJsonp(url);
@@ -636,23 +977,30 @@ function pullSnapshotJsonp(baseUrl) {
 }
 
 async function mergeSnapshot(snapshot) {
+  const pendingOps = await idbGetAll(STORE_OPS);
+
+  await mergeProjectsSnapshot(snapshot, pendingOps);
+
   const remoteRecords = Array.isArray(snapshot.records) ? snapshot.records : [];
   const remoteDeletions = Array.isArray(snapshot.deletions) ? snapshot.deletions : [];
-  const pendingOps = await idbGetAll(STORE_OPS);
-  const latestPending = new Map(coalesceOps(pendingOps).map(op => [op.id, op]));
+  const latestPending = new Map(
+    coalesceOps(pendingOps)
+      .filter(op => String(op.entity || 'record') === 'record')
+      .map(op => [String(op.id), op])
+  );
+
   const localRecords = await idbGetAll(STORE_RECORDS);
-  const localMap = new Map(localRecords.map(r => [r.id, r]));
+  const localMap = new Map(localRecords.map(r => [String(r.id), r]));
   const remoteIds = new Set(remoteRecords.map(r => String(r.id || '')).filter(Boolean));
 
   const puts = [];
   const deletes = [];
 
-  // اگر رکوردی قبلاً همگام بوده، Pending ندارد و دیگر در Snapshot سرور نیست،
-  // حذف مستقیم آن از Google Sheet را نیز روی دستگاه منعکس می‌کنیم.
   for (const local of localRecords) {
-    if (!remoteIds.has(local.id) && !latestPending.has(local.id)) {
-      deletes.push(local.id);
-      localMap.delete(local.id);
+    const id = String(local.id);
+    if (!remoteIds.has(id) && !latestPending.has(id)) {
+      deletes.push(id);
+      localMap.delete(id);
     }
   }
 
@@ -664,9 +1012,7 @@ async function mergeSnapshot(snapshot) {
     const pending = latestPending.get(id);
     const local = localMap.get(id);
 
-    if (pending && Number(pending.updatedAt || 0) > deletedAt) {
-      continue;
-    }
+    if (pending && Number(pending.updatedAt || 0) > deletedAt) continue;
 
     if (!local || deletedAt >= Number(local.updatedAt || 0)) {
       deletes.push(id);
@@ -681,9 +1027,7 @@ async function mergeSnapshot(snapshot) {
     const pending = latestPending.get(normalized.id);
     const local = localMap.get(normalized.id);
 
-    if (pending && Number(pending.updatedAt || 0) > normalized.updatedAt) {
-      continue;
-    }
+    if (pending && Number(pending.updatedAt || 0) > normalized.updatedAt) continue;
 
     if (!local || normalized.updatedAt >= Number(local.updatedAt || 0)) {
       puts.push(normalized);
@@ -691,8 +1035,66 @@ async function mergeSnapshot(snapshot) {
     }
   }
 
-  await idbBulkApply({ storeName: STORE_RECORDS, puts, deletes });
+  await idbBulkApply({ storeName: STORE_RECORDS, puts, deletes: [...new Set(deletes)] });
   await confirmPendingOps(snapshot, pendingOps);
+}
+
+async function mergeProjectsSnapshot(snapshot, pendingOps) {
+  const remoteProjects = Array.isArray(snapshot.projects) ? snapshot.projects : [];
+  const projectPending = new Map(
+    coalesceOps(pendingOps)
+      .filter(op => String(op.entity || 'record') === 'project')
+      .map(op => [String(op.id), op])
+  );
+
+  const localProjects = await idbGetAll(STORE_PROJECTS);
+  const localMap = new Map(localProjects.map(p => [String(p.id), p]));
+  const remoteIds = new Set(remoteProjects.map(p => String(p.id || '')).filter(Boolean));
+
+  const puts = [];
+  const deletes = [];
+
+  for (const local of localProjects) {
+    const id = String(local.id);
+    if (!remoteIds.has(id) && !projectPending.has(id)) {
+      deletes.push(id);
+      localMap.delete(id);
+    }
+  }
+
+  for (const remote of remoteProjects) {
+    const id = String(remote.id || '');
+    if (!id) continue;
+
+    const updatedAt = Number(remote.updatedAt || 0);
+    const deletedAt = Number(remote.deletedAt || 0);
+    const pending = projectPending.get(id);
+    const local = localMap.get(id);
+    const serverLatest = Math.max(updatedAt, deletedAt);
+
+    if (pending && Number(pending.updatedAt || 0) > serverLatest) continue;
+
+    if (deletedAt > 0 && deletedAt >= updatedAt) {
+      deletes.push(id);
+      localMap.delete(id);
+      continue;
+    }
+
+    const normalized = {
+      id,
+      name: String(remote.name || '').trim(),
+      updatedAt
+    };
+
+    if (!normalized.name) continue;
+
+    if (!local || updatedAt >= Number(local.updatedAt || 0)) {
+      puts.push(normalized);
+      localMap.set(id, normalized);
+    }
+  }
+
+  await idbBulkApply({ storeName: STORE_PROJECTS, puts, deletes: [...new Set(deletes)] });
 }
 
 function normalizeRemoteRecord(remote) {
@@ -703,26 +1105,57 @@ function normalizeRemoteRecord(remote) {
     amount: Number(remote.amount) || 0,
     reason: String(remote.reason || ''),
     payee: String(remote.payee || ''),
+    projectId: String(remote.projectId || ''),
+    projectName: String(remote.projectName || ''),
     date: normalizePersianDate(remote.date) || String(remote.date || ''),
     updatedAt: Number(remote.updatedAt) || 0
   };
 }
 
 async function confirmPendingOps(snapshot, pendingOps) {
-  const recordMap = new Map((snapshot.records || []).map(r => [String(r.id), Number(r.updatedAt || 0)]));
-  const deletionMap = new Map((snapshot.deletions || []).map(d => [String(d.id), Number(d.deletedAt || 0)]));
+  const recordMap = new Map(
+    (snapshot.records || []).map(r => [String(r.id), Number(r.updatedAt || 0)])
+  );
+
+  const deletionMap = new Map(
+    (snapshot.deletions || []).map(d => [String(d.id), Number(d.deletedAt || 0)])
+  );
+
+  const projectMap = new Map(
+    (snapshot.projects || []).map(project => [
+      String(project.id),
+      {
+        updatedAt: Number(project.updatedAt || 0),
+        deletedAt: Number(project.deletedAt || 0)
+      }
+    ])
+  );
+
   const confirmed = [];
 
   for (const op of pendingOps) {
     const opAt = Number(op.updatedAt || 0);
+    const entity = String(op.entity || 'record');
+
+    if (entity === 'project') {
+      const server = projectMap.get(String(op.id)) || { updatedAt: 0, deletedAt: 0 };
+
+      if (op.type === 'delete') {
+        if (server.deletedAt >= opAt) confirmed.push(op.opId);
+      } else if (server.updatedAt >= opAt && server.updatedAt >= server.deletedAt) {
+        confirmed.push(op.opId);
+      }
+
+      continue;
+    }
 
     if (op.type === 'delete') {
-      const serverAt = Number(deletionMap.get(op.id) || 0);
+      const serverAt = Number(deletionMap.get(String(op.id)) || 0);
       if (serverAt >= opAt) confirmed.push(op.opId);
       continue;
     }
 
-    const serverAt = Number(recordMap.get(op.id) || 0);
+    const serverAt = Number(recordMap.get(String(op.id)) || 0);
     if (serverAt >= opAt) confirmed.push(op.opId);
   }
 
@@ -744,6 +1177,7 @@ function updateConnectivityUi(forcedState) {
   const dot = $('statusDot');
   const text = $('statusText');
   const strip = $('offlineStrip');
+  if (!dot || !text || !strip) return;
 
   dot.className = 'status-dot';
 
@@ -852,23 +1286,28 @@ async function testConnection() {
 
 function setSettingsStatus(message, ok) {
   const el = $('settingsStatus');
+  if (!el) return;
   el.textContent = message;
   el.className = `settings-status ${ok ? 'ok' : 'error'}`;
 }
 
 function showOverlay(el) {
+  if (!el) return;
   el.classList.add('show');
   el.setAttribute('aria-hidden', 'false');
   document.body.style.overflow = 'hidden';
 }
 
 function hideOverlay(el) {
+  if (!el) return;
   el.classList.remove('show');
   el.setAttribute('aria-hidden', 'true');
 
-  if (!$('recordOverlay').classList.contains('show') && !$('settingsOverlay').classList.contains('show')) {
-    document.body.style.overflow = '';
-  }
+  const anyOpen = ['recordOverlay', 'settingsOverlay', 'projectOverlay']
+    .map(id => $(id))
+    .some(item => item && item.classList.contains('show'));
+
+  if (!anyOpen) document.body.style.overflow = '';
 }
 
 function closeRecordModal() {
@@ -877,12 +1316,14 @@ function closeRecordModal() {
 }
 
 function setLoading(show, text = 'در حال پردازش...') {
+  if (!$('loading') || !$('loadingText')) return;
   $('loadingText').textContent = text;
   $('loading').hidden = !show;
 }
 
 function toast(message) {
   const el = $('toast');
+  if (!el) return;
   el.textContent = message;
   el.classList.add('show');
   clearTimeout(toastTimer);
@@ -950,8 +1391,8 @@ function getPersianTodayClient() {
 }
 
 function createUuid() {
-  if (crypto && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
+  if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
   }
 
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -977,9 +1418,7 @@ function escapeHtmlAttr(s) {
 
 function repositionCalendarIfOpen() {
   const popover = $('calendarPopover');
-  if (popover && popover.classList.contains('show')) {
-    positionCalendar();
-  }
+  if (popover && popover.classList.contains('show')) positionCalendar();
 }
 
 function parsePersianDate(value) {
@@ -989,8 +1428,12 @@ function parsePersianDate(value) {
   return { year, month, day };
 }
 
-function openCalendar() {
-  const parsed = parsePersianDate($('date').value) || parsePersianDate(state.today);
+function openCalendarFor(inputId) {
+  const input = $(inputId);
+  if (!input) return;
+
+  calendarTargetId = inputId;
+  const parsed = parsePersianDate(input.value) || parsePersianDate(state.today || getPersianTodayClient());
 
   if (parsed) {
     calYear = parsed.year;
@@ -1003,7 +1446,7 @@ function openCalendar() {
 }
 
 function closeCalendar() {
-  $('calendarPopover').classList.remove('show');
+  $('calendarPopover')?.classList.remove('show');
 }
 
 function changeCalendarMonth(delta) {
@@ -1025,12 +1468,13 @@ function changeCalendarMonth(delta) {
 
 function selectToday() {
   const today = getPersianTodayClient() || state.today;
-  if (!today) return;
+  const input = $(calendarTargetId);
+  if (!today || !input) return;
 
   state.today = today;
-  $('date').value = today;
-  const parsed = parsePersianDate(today);
+  input.value = today;
 
+  const parsed = parsePersianDate(today);
   if (parsed) {
     calYear = parsed.year;
     calMonth = parsed.month;
@@ -1040,6 +1484,8 @@ function selectToday() {
 }
 
 function renderCalendar() {
+  if (!$('calendarTitle') || !$('calendarWeekdays') || !$('calendarDays')) return;
+
   $('calendarTitle').textContent = `${PERSIAN_MONTHS[calMonth - 1]} ${calYear}`;
   $('calendarWeekdays').innerHTML = WEEKDAYS.map(x => `<div>${x}</div>`).join('');
 
@@ -1061,7 +1507,7 @@ function renderCalendar() {
     container.appendChild(empty);
   }
 
-  const selected = parsePersianDate($('date').value);
+  const selected = parsePersianDate($(calendarTargetId)?.value);
   const today = parsePersianDate(state.today || getPersianTodayClient());
   const count = jalaliMonthLength(calYear, calMonth);
 
@@ -1090,7 +1536,10 @@ function renderCalendar() {
     }
 
     btn.addEventListener('click', () => {
-      $('date').value = `${calYear}/${String(calMonth).padStart(2, '0')}/${String(day).padStart(2, '0')}`;
+      const input = $(calendarTargetId);
+      if (input) {
+        input.value = `${calYear}/${String(calMonth).padStart(2, '0')}/${String(day).padStart(2, '0')}`;
+      }
       closeCalendar();
     });
 
@@ -1099,9 +1548,9 @@ function renderCalendar() {
 }
 
 function positionCalendar() {
-  const input = $('date');
+  const input = $(calendarTargetId);
   const popover = $('calendarPopover');
-  if (!popover.classList.contains('show')) return;
+  if (!input || !popover || !popover.classList.contains('show')) return;
 
   const rect = input.getBoundingClientRect();
   const viewportWidth = window.innerWidth;
@@ -1135,6 +1584,309 @@ function positionCalendar() {
   popover.style.left = `${left}px`;
   popover.style.top = `${top}px`;
   popover.style.right = 'auto';
+}
+
+async function exportExcel() {
+  const records = getFilteredRecords();
+
+  if (!records.length) {
+    toast('رکوردی برای خروجی وجود ندارد.');
+    return;
+  }
+
+  const pendingIds = new Set(
+    state.pendingOps
+      .filter(op => String(op.entity || 'record') === 'record')
+      .map(op => String(op.id))
+  );
+
+  const rows = [[
+    'ردیف',
+    'پروژه',
+    'مبلغ',
+    'بابت',
+    'به نام',
+    'تاریخ شمسی',
+    'وضعیت'
+  ]];
+
+  records.forEach((record, index) => {
+    rows.push([
+      index + 1,
+      resolveProjectName(record),
+      Number(record.amount || 0),
+      record.reason || '',
+      record.payee || '',
+      record.date || '',
+      pendingIds.has(String(record.id)) ? 'در انتظار همگام‌سازی' : 'همگام'
+    ]);
+  });
+
+  const total = records.reduce((sum, record) => sum + Number(record.amount || 0), 0);
+  rows.push(['', 'جمع کل', total, '', '', '', '']);
+
+  try {
+    const bytes = buildXlsx(rows);
+    const blob = new Blob([bytes], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const today = state.today || getPersianTodayClient() || 'report';
+
+    a.href = url;
+    a.download = `گزارش-ثبت-مبالغ-${today.replaceAll('/', '-')}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast('فایل Excel آماده شد.');
+  } catch (error) {
+    console.error(error);
+    toast('ساخت فایل Excel ناموفق بود.');
+  }
+}
+
+function buildXlsx(rows) {
+  const now = new Date().toISOString();
+  const lastRow = rows.length;
+
+  const sheetRows = rows.map((row, rowIndex) => {
+    const cells = row.map((value, colIndex) => {
+      const ref = `${columnName(colIndex + 1)}${rowIndex + 1}`;
+      const isHeader = rowIndex === 0;
+      const isTotal = rowIndex === rows.length - 1;
+      const isAmount = colIndex === 2 && rowIndex > 0;
+
+      let style = '';
+      if (isHeader) style = ' s="1"';
+      else if (isTotal && (colIndex === 1 || colIndex === 2)) style = colIndex === 2 ? ' s="3"' : ' s="4"';
+      else if (isAmount) style = ' s="2"';
+
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        return `<c r="${ref}"${style}><v>${value}</v></c>`;
+      }
+
+      return `<c r="${ref}" t="inlineStr"${style}><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>`;
+    }).join('');
+
+    return `<row r="${rowIndex + 1}">${cells}</row>`;
+  }).join('');
+
+  const worksheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetViews><sheetView workbookViewId="0" rightToLeft="1"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+  <cols>
+    <col min="1" max="1" width="9" customWidth="1"/>
+    <col min="2" max="2" width="24" customWidth="1"/>
+    <col min="3" max="3" width="18" customWidth="1"/>
+    <col min="4" max="4" width="42" customWidth="1"/>
+    <col min="5" max="5" width="28" customWidth="1"/>
+    <col min="6" max="6" width="16" customWidth="1"/>
+    <col min="7" max="7" width="23" customWidth="1"/>
+  </cols>
+  <sheetData>${sheetRows}</sheetData>
+  <autoFilter ref="A1:G${Math.max(1, lastRow - 1)}"/>
+</worksheet>`;
+
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0"/></numFmts>
+  <fonts count="3">
+    <font><sz val="11"/><name val="Arial"/></font>
+    <font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Arial"/></font>
+    <font><b/><sz val="11"/><name val="Arial"/></font>
+  </fonts>
+  <fills count="3">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF1F4E78"/><bgColor indexed="64"/></patternFill></fill>
+  </fills>
+  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="5">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+    <xf numFmtId="164" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyNumberFormat="1"/>
+    <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+  </cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+
+  const files = [
+    ['[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>`],
+    ['_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>`],
+    ['docProps/core.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <dc:title>گزارش ثبت مبالغ</dc:title>
+  <dc:creator>Expense PWA</dc:creator>
+  <dcterms:created xsi:type="dcterms:W3CDTF">${now}</dcterms:created>
+  <dcterms:modified xsi:type="dcterms:W3CDTF">${now}</dcterms:modified>
+</cp:coreProperties>`],
+    ['docProps/app.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <Application>Expense PWA</Application>
+</Properties>`],
+    ['xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="گزارش" sheetId="1" r:id="rId1"/></sheets>
+</workbook>`],
+    ['xl/_rels/workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`],
+    ['xl/styles.xml', styles],
+    ['xl/worksheets/sheet1.xml', worksheet]
+  ];
+
+  return createStoredZip(files);
+}
+
+function columnName(index) {
+  let n = index;
+  let out = '';
+  while (n > 0) {
+    n--;
+    out = String.fromCharCode(65 + (n % 26)) + out;
+    n = Math.floor(n / 26);
+  }
+  return out;
+}
+
+function xmlEscape(value) {
+  return String(value == null ? '' : value)
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function createStoredZip(files) {
+  const encoder = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+
+  const now = new Date();
+  const dosTime = ((now.getHours() & 31) << 11) | ((now.getMinutes() & 63) << 5) | ((Math.floor(now.getSeconds() / 2)) & 31);
+  const dosDate = (((now.getFullYear() - 1980) & 127) << 9) | (((now.getMonth() + 1) & 15) << 5) | (now.getDate() & 31);
+
+  files.forEach(([name, content]) => {
+    const nameBytes = encoder.encode(name);
+    const data = encoder.encode(content);
+    const crc = crc32(data);
+
+    const localHeader = new Uint8Array(30 + nameBytes.length);
+    const lv = new DataView(localHeader.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0x0800, true);
+    lv.setUint16(8, 0, true);
+    lv.setUint16(10, dosTime, true);
+    lv.setUint16(12, dosDate, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, data.length, true);
+    lv.setUint32(22, data.length, true);
+    lv.setUint16(26, nameBytes.length, true);
+    lv.setUint16(28, 0, true);
+    localHeader.set(nameBytes, 30);
+
+    localParts.push(localHeader, data);
+
+    const central = new Uint8Array(46 + nameBytes.length);
+    const cv = new DataView(central.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint16(12, dosTime, true);
+    cv.setUint16(14, dosDate, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, data.length, true);
+    cv.setUint32(24, data.length, true);
+    cv.setUint16(28, nameBytes.length, true);
+    cv.setUint16(30, 0, true);
+    cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true);
+    cv.setUint16(36, 0, true);
+    cv.setUint32(38, 0, true);
+    cv.setUint32(42, offset, true);
+    central.set(nameBytes, 46);
+    centralParts.push(central);
+
+    offset += localHeader.length + data.length;
+  });
+
+  const centralOffset = offset;
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(4, 0, true);
+  ev.setUint16(6, 0, true);
+  ev.setUint16(8, files.length, true);
+  ev.setUint16(10, files.length, true);
+  ev.setUint32(12, centralSize, true);
+  ev.setUint32(16, centralOffset, true);
+  ev.setUint16(20, 0, true);
+
+  return concatUint8Arrays([...localParts, ...centralParts, end]);
+}
+
+function concatUint8Arrays(parts) {
+  const total = parts.reduce((sum, part) => sum + part.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+
+  return out;
+}
+
+let CRC32_TABLE = null;
+
+function crc32(bytes) {
+  if (!CRC32_TABLE) {
+    CRC32_TABLE = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) {
+        c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      }
+      CRC32_TABLE[n] = c >>> 0;
+    }
+  }
+
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) {
+    crc = CRC32_TABLE[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
 }
 
 function jalaliMonthLength(jy, jm) {
@@ -1187,9 +1939,7 @@ function jalCal(jy) {
   n = jy - jp;
   leapJ += div(n, 33) * 8 + div(mod(n, 33) + 3, 4);
 
-  if (mod(jump, 33) === 4 && jump - n === 4) {
-    leapJ += 1;
-  }
+  if (mod(jump, 33) === 4 && jump - n === 4) leapJ += 1;
 
   leapG = div(gy, 4) - div((div(gy, 100) + 1) * 3, 4) - 150;
   march = 20 + leapJ - leapG;
