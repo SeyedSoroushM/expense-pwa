@@ -17,7 +17,7 @@
 </head>
 <body>
   <div class="offline-strip" id="offlineStrip" hidden>
-    شما آفلاین هستید؛ تغییرات روی گوشی ذخیره می‌شوند و بعداً همگام خواهند شد.
+    شما آفلاین هستید؛ تغییرات روی همین دستگاه ذخیره می‌شوند و پس از برقراری اینترنت همگام خواهند شد.
   </div>
 
   <main class="app-shell">
@@ -26,7 +26,7 @@
         <div class="brand-block">
           <h1>مدیریت ثبت مبالغ</h1>
           <div class="connection-line">
-            <span class="status-dot" id="statusDot"></span>
+            <span class="status-dot" id="statusDot" aria-hidden="true"></span>
             <span id="statusText">در حال آماده‌سازی...</span>
           </div>
         </div>
@@ -35,19 +35,26 @@
           <button class="ghost-btn" id="installBtn" type="button" hidden>
             نصب برنامه
           </button>
+
           <button class="ghost-btn" id="syncBtn" type="button">
             همگام‌سازی
           </button>
-          <button class="ghost-btn icon-only" id="settingsBtn" type="button" aria-label="تنظیمات">
+
+          <button class="ghost-btn" id="exportExcelBtn" type="button">
+            خروجی Excel
+          </button>
+
+          <button class="ghost-btn icon-only" id="settingsBtn" type="button" aria-label="تنظیمات همگام‌سازی" title="تنظیمات همگام‌سازی">
             ⚙
           </button>
+
           <button class="add-btn" id="addBtn" type="button">
             ＋ ایجاد ردیف جدید
           </button>
         </div>
       </div>
 
-      <section class="kpis">
+      <section class="kpis" aria-label="خلاصه اطلاعات">
         <article class="kpi">
           <div class="kpi-label">جمع کل مبلغ</div>
           <div class="kpi-value" id="totalValue">0</div>
@@ -65,6 +72,79 @@
       </section>
     </header>
 
+    <section class="filters-card" aria-label="فیلتر گزارش">
+      <div class="filter-field">
+        <label for="filterProject">پروژه</label>
+        <select id="filterProject">
+          <option value="">همه پروژه‌ها</option>
+          <option value="__NONE__">بدون پروژه</option>
+        </select>
+      </div>
+
+      <div class="filter-field">
+        <label for="filterFrom">از تاریخ</label>
+        <div class="date-wrap">
+          <input
+            id="filterFrom"
+            type="text"
+            inputmode="numeric"
+            readonly
+            autocomplete="off"
+            placeholder="1405/01/01"
+            aria-label="از تاریخ شمسی"
+          >
+          <button
+            class="calendar-trigger"
+            id="filterFromCalendarBtn"
+            type="button"
+            aria-label="انتخاب تاریخ شروع"
+            title="انتخاب تاریخ شروع"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="16" rx="2"></rect>
+              <path d="M16 3v4M8 3v4M3 10h18"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="filter-field">
+        <label for="filterTo">تا تاریخ</label>
+        <div class="date-wrap">
+          <input
+            id="filterTo"
+            type="text"
+            inputmode="numeric"
+            readonly
+            autocomplete="off"
+            placeholder="1405/12/29"
+            aria-label="تا تاریخ شمسی"
+          >
+          <button
+            class="calendar-trigger"
+            id="filterToCalendarBtn"
+            type="button"
+            aria-label="انتخاب تاریخ پایان"
+            title="انتخاب تاریخ پایان"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="16" rx="2"></rect>
+              <path d="M16 3v4M8 3v4M3 10h18"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="filter-actions">
+        <button class="primary filter-button" id="applyFilterBtn" type="button">
+          اعمال فیلتر
+        </button>
+        <button class="secondary filter-button" id="resetFilterBtn" type="button">
+          حذف فیلتر
+        </button>
+      </div>
+    </section>
+
     <section class="table-card">
       <div class="table-wrap">
         <table>
@@ -74,6 +154,7 @@
               <th class="col-amount">مبلغ</th>
               <th>بابت</th>
               <th class="col-payee">به نام</th>
+              <th class="col-project">پروژه</th>
               <th class="col-date">تاریخ شمسی</th>
               <th class="col-sync">وضعیت</th>
               <th class="col-actions">عملیات</th>
@@ -84,13 +165,14 @@
 
         <div class="empty-state" id="emptyState" hidden>
           <div class="empty-icon">＋</div>
-          <div class="empty-title">هنوز ردیفی ثبت نشده است</div>
-          <div class="empty-text">حتی در حالت آفلاین می‌توانید اولین ردیف را ایجاد کنید.</div>
+          <div class="empty-title">رکوردی برای نمایش وجود ندارد</div>
+          <div class="empty-text">در صورت فعال بودن فیلتر، فیلترها را حذف کنید یا یک ردیف جدید ایجاد کنید.</div>
         </div>
       </div>
     </section>
   </main>
 
+  <!-- ثبت / ویرایش رکورد -->
   <div class="overlay" id="recordOverlay" aria-hidden="true">
     <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <div class="modal-head">
@@ -118,35 +200,52 @@
 
       <div class="field">
         <label for="payee">به نام</label>
-        <input id="payee" type="text" autocomplete="off" placeholder="نام شخص، شرکت یا حساب">
+        <input
+          id="payee"
+          type="text"
+          autocomplete="off"
+          placeholder="نام شخص، شرکت یا حساب"
+        >
+      </div>
+
+      <div class="field">
+        <div class="field-label-row">
+          <label for="projectId">پروژه</label>
+          <button class="text-button" id="manageProjectsBtn" type="button">
+            مدیریت پروژه‌ها
+          </button>
+        </div>
+
+        <select id="projectId">
+          <option value="">انتخاب پروژه...</option>
+        </select>
       </div>
 
       <div class="field" id="dateField">
         <label for="date">تاریخ شمسی</label>
 
         <div class="date-wrap">
-          <input id="date" type="text" readonly placeholder="1405/06/30">
-          <button class="calendar-trigger" id="calendarTrigger" type="button" aria-label="انتخاب تاریخ شمسی">
+          <input
+            id="date"
+            type="text"
+            inputmode="numeric"
+            readonly
+            autocomplete="off"
+            placeholder="1405/06/30"
+          >
+
+          <button
+            class="calendar-trigger"
+            id="calendarTrigger"
+            type="button"
+            aria-label="انتخاب تاریخ شمسی"
+            title="انتخاب تاریخ شمسی"
+          >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="3" y="5" width="18" height="16" rx="2"></rect>
               <path d="M16 3v4M8 3v4M3 10h18"></path>
             </svg>
           </button>
-        </div>
-
-        <div class="calendar-popover" id="calendarPopover">
-          <div class="cal-header">
-            <button class="cal-nav" id="calPrevBtn" type="button" title="ماه قبل">›</button>
-            <div class="cal-title" id="calendarTitle"></div>
-            <button class="cal-nav" id="calNextBtn" type="button" title="ماه بعد">‹</button>
-          </div>
-
-          <div class="cal-weekdays" id="calendarWeekdays"></div>
-          <div class="cal-days" id="calendarDays"></div>
-
-          <div class="cal-footer">
-            <button class="cal-today" id="calTodayBtn" type="button">امروز</button>
-          </div>
         </div>
       </div>
 
@@ -157,6 +256,40 @@
     </section>
   </div>
 
+  <!-- مدیریت پروژه‌ها -->
+  <div class="overlay" id="projectOverlay" aria-hidden="true">
+    <section class="modal projects-modal" role="dialog" aria-modal="true" aria-labelledby="projectsTitle">
+      <div class="modal-head">
+        <div class="modal-title" id="projectsTitle">مدیریت پروژه‌ها</div>
+        <button class="close-btn" id="projectCloseBtn" type="button" aria-label="بستن">×</button>
+      </div>
+
+      <input id="projectEditId" type="hidden">
+
+      <div class="field">
+        <label for="projectName">نام پروژه</label>
+        <input
+          id="projectName"
+          type="text"
+          autocomplete="off"
+          placeholder="مثلاً پروژه دفتر مرکزی"
+        >
+      </div>
+
+      <div class="project-form-actions">
+        <button class="primary" id="projectSaveBtn" type="button">
+          افزودن پروژه
+        </button>
+        <button class="secondary" id="projectCancelEditBtn" type="button" hidden>
+          انصراف از ویرایش
+        </button>
+      </div>
+
+      <div class="project-list" id="projectList"></div>
+    </section>
+  </div>
+
+  <!-- تنظیمات همگام‌سازی -->
   <div class="overlay" id="settingsOverlay" aria-hidden="true">
     <section class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
       <div class="modal-head">
@@ -170,12 +303,24 @@
 
       <div class="field">
         <label for="apiUrl">Apps Script Web App URL</label>
-        <input id="apiUrl" type="url" dir="ltr" placeholder="https://script.google.com/macros/s/.../exec">
+        <input
+          id="apiUrl"
+          type="url"
+          dir="ltr"
+          autocomplete="off"
+          placeholder="https://script.google.com/macros/s/.../exec"
+        >
       </div>
 
       <div class="field">
         <label for="apiToken">API Token</label>
-        <input id="apiToken" type="password" dir="ltr" autocomplete="off" placeholder="توکن طولانی و تصادفی">
+        <input
+          id="apiToken"
+          type="password"
+          dir="ltr"
+          autocomplete="off"
+          placeholder="توکن طولانی و تصادفی"
+        >
       </div>
 
       <div class="settings-status" id="settingsStatus"></div>
@@ -187,16 +332,33 @@
     </section>
   </div>
 
+  <!-- تقویم شمسی مشترک برای ثبت و فیلتر -->
+  <div class="calendar-popover" id="calendarPopover" role="dialog" aria-label="تقویم شمسی">
+    <div class="cal-header">
+      <button class="cal-nav" id="calPrevBtn" type="button" title="ماه قبل" aria-label="ماه قبل">›</button>
+      <div class="cal-title" id="calendarTitle"></div>
+      <button class="cal-nav" id="calNextBtn" type="button" title="ماه بعد" aria-label="ماه بعد">‹</button>
+    </div>
+
+    <div class="cal-weekdays" id="calendarWeekdays"></div>
+    <div class="cal-days" id="calendarDays"></div>
+
+    <div class="cal-footer">
+      <button class="cal-today" id="calTodayBtn" type="button">امروز</button>
+    </div>
+  </div>
+
+  <!-- فرم fallback برای Sync در مرورگرهایی که POST fetch مشکل دارد -->
   <iframe id="syncFrame" name="syncFrame" title="sync" hidden></iframe>
 
   <div class="loading" id="loading" hidden>
     <div class="loading-card">
-      <div class="spinner"></div>
+      <div class="spinner" aria-hidden="true"></div>
       <span id="loadingText">در حال پردازش...</span>
     </div>
   </div>
 
-  <div class="toast" id="toast"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script src="app.js" defer></script>
 </body>
