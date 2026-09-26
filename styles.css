@@ -26,13 +26,13 @@
 }
 
 *{box-sizing:border-box}
-
 html{-webkit-text-size-adjust:100%}
 
 body,
 button,
 input,
-textarea{
+textarea,
+select{
   font-family:'VazirmatnLocal','Vazirmatn','Vazir',Tahoma,Arial,sans-serif;
 }
 
@@ -43,9 +43,8 @@ body{
   color:var(--text);
 }
 
-button,input,textarea{-webkit-tap-highlight-color:transparent}
+button,input,textarea,select{-webkit-tap-highlight-color:transparent}
 button{touch-action:manipulation}
-
 [hidden]{display:none !important}
 
 .offline-strip{
@@ -62,7 +61,7 @@ button{touch-action:manipulation}
 }
 
 .app-shell{
-  max-width:1180px;
+  max-width:1280px;
   margin:0 auto;
   padding:16px;
 }
@@ -189,6 +188,39 @@ button{touch-action:manipulation}
 
 .warning-kpi .kpi-value{color:#b54708}
 
+.filters-card{
+  display:grid;
+  grid-template-columns:minmax(190px,1.2fr) minmax(160px,1fr) minmax(160px,1fr) auto;
+  align-items:end;
+  gap:12px;
+  padding:14px;
+  margin:0 0 14px;
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:16px;
+  box-shadow:var(--shadow);
+}
+
+.filter-field{min-width:0}
+
+.filter-field label{
+  display:block;
+  margin-bottom:6px;
+  color:var(--muted);
+  font-size:12px;
+  font-weight:800;
+}
+
+.filter-actions{
+  display:flex;
+  gap:8px;
+}
+
+.filter-button{
+  min-width:100px;
+  white-space:nowrap;
+}
+
 .table-card{
   background:var(--card);
   border:1px solid var(--line);
@@ -199,13 +231,13 @@ button{touch-action:manipulation}
 
 .table-wrap{
   overflow:auto;
-  max-height:calc(100vh - 235px);
+  max-height:calc(100vh - 315px);
 }
 
 table{
   width:100%;
   border-collapse:collapse;
-  min-width:1050px;
+  min-width:1220px;
 }
 
 thead th{
@@ -231,7 +263,8 @@ tbody td{
 tbody tr:hover td{background:#f9fbfd}
 
 td.reason,
-td.payee{
+td.payee,
+td.project{
   text-align:right;
   white-space:normal;
   word-break:break-word;
@@ -239,11 +272,13 @@ td.payee{
 
 td.reason{max-width:340px}
 td.payee{max-width:220px}
+td.project{max-width:200px}
 td.amount{font-weight:800;font-variant-numeric:tabular-nums}
 
 .col-row{width:68px}
 .col-amount{width:150px}
 .col-payee{width:200px}
+.col-project{width:190px}
 .col-date{width:135px}
 .col-sync{width:125px}
 .col-actions{width:135px}
@@ -382,7 +417,8 @@ label{
 }
 
 input,
-textarea{
+textarea,
+select{
   width:100%;
   border:1px solid #d0d5dd;
   border-radius:11px;
@@ -393,8 +429,14 @@ textarea{
   color:var(--text);
 }
 
+select{
+  appearance:auto;
+  min-height:48px;
+}
+
 input:focus,
-textarea:focus{
+textarea:focus,
+select:focus{
   border-color:var(--blue);
   box-shadow:0 0 0 3px rgba(47,111,237,.10);
 }
@@ -403,6 +445,26 @@ textarea{
   resize:vertical;
   min-height:76px;
   max-height:150px;
+}
+
+.field-label-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:7px;
+}
+
+.field-label-row label{margin-bottom:0}
+
+.text-button{
+  border:0;
+  background:transparent;
+  color:var(--blue);
+  cursor:pointer;
+  font-size:12px;
+  font-weight:800;
+  padding:4px 0;
 }
 
 .date-wrap{position:relative}
@@ -572,6 +634,68 @@ textarea{
 .settings-status.ok{color:#027a48}
 .settings-status.error{color:var(--red)}
 
+.projects-modal{width:min(620px,100%)}
+
+.project-form-actions{
+  display:flex;
+  gap:8px;
+  margin-bottom:16px;
+}
+
+.project-list{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  max-height:330px;
+  overflow:auto;
+  padding-left:2px;
+}
+
+.project-empty{
+  padding:22px 12px;
+  border:1px dashed #d0d5dd;
+  border-radius:12px;
+  text-align:center;
+  color:var(--muted);
+  font-size:12px;
+}
+
+.project-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:11px 12px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:#f9fafb;
+}
+
+.project-row-name{
+  flex:1;
+  min-width:0;
+  font-weight:800;
+  color:var(--navy);
+  overflow-wrap:anywhere;
+}
+
+.project-row-actions{
+  display:flex;
+  gap:6px;
+  flex:0 0 auto;
+}
+
+.project-small-btn{
+  border:1px solid var(--line);
+  border-radius:8px;
+  padding:6px 9px;
+  background:#fff;
+  cursor:pointer;
+  font-size:11px;
+}
+
+.project-small-btn.delete{color:var(--red)}
+
 .loading{
   position:fixed;
   inset:0;
@@ -627,6 +751,16 @@ textarea{
 
 .toast.show{opacity:1;transform:translateY(0)}
 
+@media (max-width:900px){
+  .filters-card{
+    grid-template-columns:1fr 1fr;
+  }
+
+  .filter-actions{
+    grid-column:1/-1;
+  }
+}
+
 @media (max-width:760px){
   .app-shell{padding:10px}
   .topbar{position:relative;padding-top:4px}
@@ -640,7 +774,21 @@ textarea{
   .warning-kpi{grid-column:1/-1}
   .kpi{padding:12px}
   .kpi-value{font-size:17px}
+
+  .filters-card{
+    grid-template-columns:1fr;
+    padding:12px;
+  }
+
+  .filter-actions{
+    grid-column:auto;
+    width:100%;
+  }
+
+  .filter-button{flex:1;min-width:0}
+
   .table-wrap{max-height:none}
+  table{min-width:1220px}
 
   .overlay{
     padding:max(10px,env(safe-area-inset-top)) 10px max(10px,env(safe-area-inset-bottom));
@@ -658,8 +806,15 @@ textarea{
   textarea{min-height:68px}
   .calendar-popover{width:calc(100vw - 20px);max-width:calc(100vw - 20px);border-radius:18px}
   .cal-day,.cal-empty{min-height:38px}
+
+  .project-row{
+    align-items:flex-start;
+  }
 }
 
 @media (display-mode:standalone){
-  body{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+  body{
+    padding-top:env(safe-area-inset-top);
+    padding-bottom:env(safe-area-inset-bottom);
+  }
 }
