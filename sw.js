@@ -1,4 +1,5 @@
-const CACHE_NAME = 'expense-pwa-shell-v1';
+const CACHE_NAME = 'expense-pwa-shell-v3-projects-filters-export';
+
 const APP_SHELL = [
   './',
   './index.html',
@@ -37,44 +38,57 @@ self.addEventListener('fetch', event => {
 
   const url = new URL(request.url);
 
-  // API های خارجی را Cache نمی‌کنیم.
+  // درخواست‌های Apps Script و هر Origin خارجی عمداً Cache نمی‌شوند.
   if (url.origin !== self.location.origin) return;
 
+  // برای Navigation ابتدا نسخه آنلاین را می‌گیریم؛ اگر اینترنت نبود index.html آفلاین باز می‌شود.
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request)
+      fetch(request, { cache: 'no-store' })
         .then(response => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put('./index.html', copy));
+          if (response && response.ok) {
+            const copy = response.clone();
+            event.waitUntil(
+              caches.open(CACHE_NAME)
+                .then(cache => cache.put('./index.html', copy))
+            );
+          }
           return response;
         })
-        .catch(() => caches.match('./index.html'))
+        .catch(async () => {
+          return (await caches.match('./index.html')) || (await caches.match('./'));
+        })
     );
     return;
   }
 
+  // فایل‌های Static: Cache-first + بروزرسانی در پس‌زمینه.
   event.respondWith(
     caches.match(request).then(cached => {
+      const networkUpdate = fetch(request)
+        .then(response => {
+          if (response && response.ok) {
+            const copy = response.clone();
+            event.waitUntil(
+              caches.open(CACHE_NAME)
+                .then(cache => cache.put(request, copy))
+            );
+          }
+          return response;
+        })
+        .catch(() => null);
+
       if (cached) {
-        event.waitUntil(
-          fetch(request)
-            .then(response => {
-              if (response && response.ok) {
-                return caches.open(CACHE_NAME)
-                  .then(cache => cache.put(request, response.clone()));
-              }
-            })
-            .catch(() => undefined)
-        );
+        event.waitUntil(networkUpdate);
         return cached;
       }
 
-      return fetch(request).then(response => {
-        if (response && response.ok) {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
-        }
-        return response;
+      return networkUpdate.then(response => {
+        if (response) return response;
+        return new Response('Offline', {
+          status: 503,
+          statusText: 'Offline'
+        });
       });
     })
   );
